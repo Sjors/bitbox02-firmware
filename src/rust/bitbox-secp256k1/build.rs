@@ -12,6 +12,8 @@ fn main() {
     );
     println!("cargo::rerun-if-changed={}", secp_dir.join("src").display());
     println!("cargo::rerun-if-changed={}", callbacks.display());
+    println!("cargo::rerun-if-changed=../../anti_exfil.c");
+    println!("cargo::rerun-if-changed=../../anti_exfil.h");
 
     let mut build = cc::Build::new();
     build
@@ -19,6 +21,7 @@ fn main() {
         .file(secp_dir.join("src/precomputed_ecmult.c"))
         .file(secp_dir.join("src/precomputed_ecmult_gen.c"))
         .file(&callbacks)
+        .file("../../anti_exfil.c")
         .include(secp_dir.join("include"))
         // Suppress all warnings in this dependency, we don't have control over them.
         .flag_if_supported("-w")
