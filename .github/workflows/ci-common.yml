@@ -81,6 +81,10 @@ jobs:
       - name: Mark directory as safe
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
 
+      - name: TEMPORARY fetch upstream signed release tags
+        if: github.repository == 'Sjors/bitbox02-firmware'
+        run: git fetch --tags https://github.com/BitBoxSwiss/bitbox02-firmware.git
+
       - name: Lint src code style (clang-format, rustfmt)
         run: ./.ci/check-style
 
@@ -119,6 +123,10 @@ jobs:
       - name: Mark directory as safe
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
 
+      - name: TEMPORARY fetch upstream signed release tags
+        if: github.repository == 'Sjors/bitbox02-firmware'
+        run: git fetch --tags https://github.com/BitBoxSwiss/bitbox02-firmware.git
+
       - name: Build unit-tests
         run: make -j$(($(nproc) + 1)) unit-test
 
@@ -144,6 +152,10 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           submodules: recursive
+
+      - name: TEMPORARY fetch upstream signed release tags
+        if: github.repository == 'Sjors/bitbox02-firmware'
+        run: git fetch --tags https://github.com/BitBoxSwiss/bitbox02-firmware.git
 
       - name: Install system dependencies
         run: brew install cbindgen bindgen hidapi
@@ -178,6 +190,10 @@ jobs:
 
       - name: Mark directory as safe
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
+
+      - name: TEMPORARY fetch upstream signed release tags
+        if: github.repository == 'Sjors/bitbox02-firmware'
+        run: git fetch --tags https://github.com/BitBoxSwiss/bitbox02-firmware.git
 
       - name: Run unit tests under valgrind
         run: make run-valgrind-on-unit-tests SANITIZE=OFF
@@ -230,6 +246,10 @@ jobs:
 
       - name: Mark directory as safe
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
+
+      - name: TEMPORARY fetch upstream signed release tags
+        if: github.repository == 'Sjors/bitbox02-firmware'
+        run: git fetch --tags https://github.com/BitBoxSwiss/bitbox02-firmware.git
 
       - name: Bootstrap Cargo config
         run: ./scripts/bootstrap-cargo-config
@@ -288,6 +308,10 @@ jobs:
           fetch-tags: true
           submodules: recursive
 
+      - name: TEMPORARY fetch upstream signed release tags
+        if: github.repository == 'Sjors/bitbox02-firmware'
+        run: git fetch --tags https://github.com/BitBoxSwiss/bitbox02-firmware.git
+
       - name: Install system dependencies
         run: brew install cbindgen bindgen hidapi
 
@@ -333,6 +357,10 @@ jobs:
 
       - name: Mark directory as safe
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
+
+      - name: TEMPORARY fetch upstream signed release tags
+        if: github.repository == 'Sjors/bitbox02-firmware'
+        run: git fetch --tags https://github.com/BitBoxSwiss/bitbox02-firmware.git
 
       - name: Build documentation
         run: |

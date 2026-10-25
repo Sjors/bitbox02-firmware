@@ -65,5 +65,9 @@ jobs:
       - name: Mark directory as safe
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: TEMPORARY fetch upstream signed release tags
+        if: github.repository == 'Sjors/bitbox02-firmware'
+        run: git fetch --tags https://github.com/BitBoxSwiss/bitbox02-firmware.git
+
       - name: Build firmware
         run: make -j$(($(nproc)+1)) firmware
