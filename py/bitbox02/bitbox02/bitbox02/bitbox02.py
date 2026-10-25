@@ -6,7 +6,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Tuple, Any, Generator, Union, Sequence
+from typing import Mapping, Optional, List, Dict, Tuple, Any, Generator, Union, Sequence
 from typing_extensions import TypedDict
 
 import semver
@@ -179,6 +179,7 @@ class BitBox02(BitBoxCommonAPI):
         response = self._msg_query(request, expected_response="device_info")
         result: Dict[str, Any] = {
             "name": response.device_info.name,
+            "taproot_anti_exfil": response.device_info.taproot_anti_exfil,
             "version": response.device_info.version,
             "bootloader_version": (
                 response.device_info.bootloader_version
@@ -461,6 +462,8 @@ class BitBox02(BitBoxCommonAPI):
         version: int = 1,
         locktime: int = 0,
         format_unit: "btc.BTCSignInitRequest.FormatUnit.V" = btc.BTCSignInitRequest.FormatUnit.DEFAULT,
+        taproot_anti_exfil: Optional[Mapping[int, btc.BTCTaprootAntiExfil]] = None,
+        anti_exfil_nonces: Optional[Dict[int, bytes]] = None,
         output_script_configs: Optional[Sequence[btc.BTCScriptConfigWithKeypath]] = None,
     ) -> Sequence[Tuple[int, bytes]]:
         """
@@ -481,6 +484,8 @@ class BitBox02(BitBoxCommonAPI):
         version: transaction version, 1 or 2.
         locktime: consensus nLockTime, interpreted as a block height or Unix timestamp.
         format_unit: defines in which unit amounts will be displayed
+        taproot_anti_exfil: explicit per-input draft protocol requests; never mixed with ordinary signing.
+        anti_exfil_nonces: receives the public nonces for a commitment-only invocation.
         output_script_configs: script types for outputs belonging to the same keystore
         Returns: list of (input index, signature) tuples.
         Raises Bitbox02Exception with ERR_USER_ABORT on user abort.
@@ -515,6 +520,15 @@ class BitBox02(BitBoxCommonAPI):
 
         sigs: List[Tuple[int, bytes]] = []
 
+        ae_round = 0
+        if taproot_anti_exfil:
+            if not self.device_info().get("taproot_anti_exfil"):
+                raise ValueError("Firmware does not support Taproot anti-exfil")
+            rounds = {2 if ae.host_entropy else 1 for ae in taproot_anti_exfil.values()}
+            if len(rounds) != 1 or set(taproot_anti_exfil) != set(range(len(inputs))):
+                raise ValueError("Taproot anti-exfil requires one round for every input")
+            ae_round = rounds.pop()
+
         # Init request
         request = hww.Request()
         request.btc_sign_init.CopyFrom(
@@ -527,6 +541,7 @@ class BitBox02(BitBoxCommonAPI):
                 locktime=locktime,
                 format_unit=format_unit,
                 output_script_configs=output_script_configs,
+                taproot_anti_exfil_round=ae_round,
             )
         )
         next_response = self._msg_query(request, expected_response="btc_sign_next").btc_sign_next
@@ -549,9 +564,16 @@ class BitBox02(BitBoxCommonAPI):
                     )
                 )
 
-                # Anti-Klepto protocol not supported yet for Schnorr signatures.
+                # The draft Taproot protocol is distinct from ECDSA anti-klepto.
+                ae = (
+                    taproot_anti_exfil.get(input_index)
+                    if taproot_anti_exfil and is_inputs_pass2
+                    else None
+                )
+                if ae is not None:
+                    request.btc_sign_input.taproot_anti_exfil.CopyFrom(ae)
                 input_is_schnorr = _is_schnorr(script_configs[tx_input["script_config_index"]])
-                perform_antiklepto = is_inputs_pass2 and not input_is_schnorr
+                perform_antiklepto = is_inputs_pass2 and not input_is_schnorr and ae is None
 
                 if perform_antiklepto:
                     host_nonce = os.urandom(32)
@@ -588,8 +610,22 @@ class BitBox02(BitBoxCommonAPI):
                         print(f"Antiklepto nonce verification PASSED for input {input_index}")
 
                 if is_inputs_pass2:
-                    assert next_response.has_signature
-                    sigs.append((input_index, next_response.signature))
+                    if ae is not None and not ae.host_entropy:
+                        if (
+                            next_response.has_signature
+                            or len(next_response.taproot_anti_exfil_nonce) != 33
+                        ):
+                            raise RuntimeError("Invalid Taproot anti-exfil commitment response")
+                        if anti_exfil_nonces is None:
+                            raise RuntimeError("Missing Taproot anti-exfil nonce destination")
+                        anti_exfil_nonces[input_index] = next_response.taproot_anti_exfil_nonce
+                    else:
+                        if (
+                            not next_response.has_signature
+                            or next_response.taproot_anti_exfil_nonce
+                        ):
+                            raise RuntimeError("Invalid transaction signing response")
+                        sigs.append((input_index, next_response.signature))
 
                 if input_index == len(inputs) - 1:
                     is_inputs_pass2 = True

@@ -117,6 +117,7 @@ message BTCSignInitRequest {
   // used script configs for outputs that send to an address of the same keystore, but not
   // necessarily the same account (as defined by `script_configs` above).
   repeated BTCScriptConfigWithKeypath output_script_configs = 10;
+  uint32 taproot_anti_exfil_round = 11; // 0 ordinary, 1 commitment-only, 2 signing.
 }
 
 message BTCSignNextResponse {
@@ -143,6 +144,17 @@ message BTCSignNextResponse {
   // Generated output. The host *must* verify its correctness using `silent_payment_dleq_proof`.
   bytes generated_output_pkscript = 7;
   bytes silent_payment_dleq_proof = 8;
+  bytes taproot_anti_exfil_nonce = 9; // 33 bytes, and has_signature is false in round 1.
+}
+
+// Draft BIP-EXFIL, separate from the ECDSA anti-klepto wire protocol.
+// Empty nonce/entropy selects the commitment-only round. The second round
+// carries the original full compressed nonce and the host opening.
+message BTCTaprootAntiExfil {
+  bytes host_commitment = 1;
+  bytes signer_nonce = 2;
+  bytes host_entropy = 3;
+  uint32 sighash = 4; // 0 (DEFAULT) or 1 (ALL)
 }
 
 message BTCSignInputRequest {
@@ -156,6 +168,7 @@ message BTCSignInputRequest {
   // If omitted, the signature uses the historical deterministic zero-contribution S2C fallback.
   // This differs from plain RFC6979 and does not provide anti-klepto protection.
   AntiKleptoHostNonceCommitment host_nonce_commitment = 8;
+  BTCTaprootAntiExfil taproot_anti_exfil = 9;
 }
 
 enum BTCOutputType {
