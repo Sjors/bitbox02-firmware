@@ -49,6 +49,7 @@ pub async fn process(hal: &mut impl crate::hal::Hal) -> Result<Response, Error> 
             hal_memory::PasswordStretchAlgo::V1 => "V2".into(),
         },
         bootloader_version: hal.memory().get_bootloader_version(),
+        taproot_anti_exfil: true,
     }))
 }
 

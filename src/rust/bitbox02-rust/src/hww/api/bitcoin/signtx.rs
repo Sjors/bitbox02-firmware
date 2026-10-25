@@ -16,6 +16,7 @@ use crate::secp256k1::SECP256K1;
 use crate::workflow::transaction;
 use crate::xpubcache::Bip32XpubCache;
 
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -737,6 +738,9 @@ async fn _process(
     if crate::keystore::is_locked() {
         return Err(Error::InvalidState);
     }
+    if request.taproot_anti_exfil_round > 2 {
+        return Err(Error::InvalidInput);
+    }
     // Validate the coin.
     let coin = pb::BtcCoin::try_from(request.coin)?;
     let coin_params = super::params::get(coin);
@@ -800,6 +804,10 @@ async fn _process(
             .set_fraction(input_index, request.num_inputs);
 
         let tx_input = get_tx_input(input_index, &mut next_response).await?;
+        if tx_input.taproot_anti_exfil.is_some() {
+            // The transcript belongs to the signing pass, after transaction review.
+            return Err(Error::InvalidInput);
+        }
         let script_config_account = validated_script_configs
             .get(tx_input.script_config_index as usize)
             .ok_or(Error::InvalidInput)?;
@@ -1214,6 +1222,16 @@ async fn _process(
 
         validate_input(&tx_input, coin_params, script_config_account)?;
 
+        match (
+            request.taproot_anti_exfil_round,
+            tx_input.taproot_anti_exfil.as_ref(),
+        ) {
+            (0, None) => {}
+            (1, Some(ae)) if ae.signer_nonce.is_empty() && ae.host_entropy.is_empty() => {}
+            (2, Some(ae)) if ae.signer_nonce.len() == 33 && ae.host_entropy.len() == 32 => {}
+            _ => return Err(Error::InvalidInput),
+        }
+
         inputs_sum_pass2 = inputs_sum_pass2
             .checked_add(tx_input.prev_out_value)
             .ok_or(Error::InvalidInput)?;
@@ -1224,7 +1242,7 @@ async fn _process(
         if is_taproot(script_config_account) {
             // This is a taproot (P2TR) input.
 
-            // Anti-Klepto protocol not supported yet for Schnorr signatures.
+            // Reject the ECDSA-specific anti-klepto message for Schnorr signatures.
             if tx_input.host_nonce_commitment.is_some() {
                 return Err(Error::InvalidInput);
             }
@@ -1253,7 +1271,11 @@ async fn _process(
                 }
                 _ => return Err(Error::Generic),
             };
-            let sighash = bip341::sighash(&bip341::Args {
+            let anti_exfil = tx_input.taproot_anti_exfil.as_ref();
+            if anti_exfil.is_some_and(|ae| ae.sighash > 1) {
+                return Err(Error::InvalidInput);
+            }
+            let sighash_args = bip341::Args {
                 version: request.version,
                 locktime: request.locktime,
                 hash_prevouts: hash_prevouts.into(),
@@ -1267,22 +1289,73 @@ async fn _process(
                 } else {
                     None
                 },
-            });
+            };
+            let sighash = if anti_exfil.is_some_and(|ae| ae.sighash == 1) {
+                bip341::sighash_with_type(&sighash_args, true)
+            } else {
+                bip341::sighash(&sighash_args)
+            };
 
-            next_response.next.has_signature = true;
-            next_response.next.signature = crate::keystore::secp256k1_schnorr_sign(
-                hal,
-                &tx_input.keypath,
-                &sighash,
-                if let TaprootSpendInfo::KeySpend(tweak_hash) = &spend_info {
-                    Some(tweak_hash.as_byte_array())
-                } else {
+            if let Some(ae) = anti_exfil {
+                let TaprootSpendInfo::KeySpend(tweak) = &spend_info else {
+                    return Err(Error::InvalidInput);
+                };
+                let commitment: &[u8; 32] = ae
+                    .host_commitment
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| Error::InvalidInput)?;
+                let reveal = if ae.signer_nonce.is_empty() && ae.host_entropy.is_empty() {
                     None
-                },
-            )
-            .await?
-            .to_vec();
+                } else {
+                    Some((
+                        ae.signer_nonce
+                            .as_slice()
+                            .try_into()
+                            .map_err(|_| Error::InvalidInput)?,
+                        ae.host_entropy
+                            .as_slice()
+                            .try_into()
+                            .map_err(|_| Error::InvalidInput)?,
+                    ))
+                };
+                let (result, is_signature) = crate::keystore::taproot_anti_exfil(
+                    hal,
+                    &tx_input.keypath,
+                    &sighash,
+                    tweak.as_byte_array(),
+                    commitment,
+                    reveal,
+                )
+                .await?;
+                if is_signature {
+                    next_response.next.has_signature = true;
+                    next_response.next.signature = result;
+                    if ae.sighash == 1 {
+                        next_response.next.signature.push(1);
+                    }
+                } else {
+                    next_response.next.taproot_anti_exfil_nonce = result;
+                }
+            } else {
+                next_response.next.has_signature = true;
+                next_response.next.signature = crate::keystore::secp256k1_schnorr_sign(
+                    hal,
+                    &tx_input.keypath,
+                    &sighash,
+                    if let TaprootSpendInfo::KeySpend(tweak_hash) = &spend_info {
+                        Some(tweak_hash.as_byte_array())
+                    } else {
+                        None
+                    },
+                )
+                .await?
+                .to_vec();
+            }
         } else {
+            if tx_input.taproot_anti_exfil.is_some() {
+                return Err(Error::InvalidInput);
+            }
             // Sign all other supported inputs.
 
             const SIGHASH_ALL: u32 = 0x01;
@@ -1365,7 +1438,8 @@ pub async fn process(
     hal: &mut impl crate::hal::Hal,
     request: &pb::BtcSignInitRequest,
 ) -> Result<Response, Error> {
-    let result = _process(hal, request).await;
+    // Keep transaction state out of the USB task's inline future.
+    let result = Box::pin(_process(hal, request)).await;
     if let Err(Error::UserAbort) = result {
         hal.ui().status("Transaction\ncanceled", false).await;
     }
@@ -1524,6 +1598,7 @@ mod tests {
                 inputs: vec![
                     TxInput {
                         input: pb::BtcSignInputRequest {
+                            taproot_anti_exfil: None,
                             prev_out_hash: vec![
                                 0x45, 0x17, 0x74, 0x50, 0x1b, 0xaf, 0xdf, 0xf7, 0x46, 0x9, 0xe,
                                 0x6, 0x16, 0xd9, 0x5e, 0xd0, 0x80, 0xd7, 0x82, 0x9a, 0xfe, 0xa2,
@@ -1577,6 +1652,7 @@ mod tests {
                     },
                     TxInput {
                         input: pb::BtcSignInputRequest {
+                            taproot_anti_exfil: None,
                             prev_out_hash: vec![
                                 0x40, 0x9b, 0x4f, 0x56, 0xca, 0x9f, 0x6, 0xcb, 0x88, 0x28, 0x3,
                                 0xad, 0x55, 0x4b, 0xeb, 0x1d, 0x9e, 0xf8, 0x78, 0x7, 0xf0, 0x52,
@@ -1683,6 +1759,7 @@ mod tests {
                 version: 2,
                 inputs: vec![TxInput {
                     input: pb::BtcSignInputRequest {
+                        taproot_anti_exfil: None,
                         prev_out_hash: vec![
                             0x41, 0x3b, 0x8e, 0x74, 0x05, 0x15, 0x96, 0x6b, 0x20, 0x2b, 0x24, 0xc3,
                             0x19, 0xfc, 0xf3, 0x5f, 0xc5, 0x37, 0x6e, 0xb2, 0x71, 0x95, 0xb8, 0x76,
@@ -1753,6 +1830,7 @@ mod tests {
 
         fn init_request(&self) -> pb::BtcSignInitRequest {
             pb::BtcSignInitRequest {
+                taproot_anti_exfil_round: 0,
                 coin: self.coin as _,
                 script_configs: vec![pb::BtcScriptConfigWithKeypath {
                     script_config: Some(pb::BtcScriptConfig {
@@ -1785,6 +1863,7 @@ mod tests {
             keypath_account: &[u32],
         ) -> pb::BtcSignInitRequest {
             pb::BtcSignInitRequest {
+                taproot_anti_exfil_round: 0,
                 coin: self.coin as _,
                 script_configs: vec![pb::BtcScriptConfigWithKeypath {
                     script_config: Some(pb::BtcScriptConfig {
@@ -2011,6 +2090,7 @@ mod tests {
 
         TxInput {
             input: pb::BtcSignInputRequest {
+                taproot_anti_exfil: None,
                 prev_out_hash: input.prev_out_hash.to_byte_array().to_vec(),
                 prev_out_index: input.prev_out_index,
                 prev_out_value: input.prev_out_value,
@@ -2122,6 +2202,7 @@ mod tests {
         request: &btc_test_vectors::FirmwareSignRequest,
     ) -> pb::BtcSignInitRequest {
         pb::BtcSignInitRequest {
+            taproot_anti_exfil_round: 0,
             coin: vector_coin(vector.coin) as _,
             script_configs: request
                 .script_configs
@@ -2617,6 +2698,7 @@ mod tests {
         *crate::hww::MOCK_NEXT_REQUEST.0.borrow_mut() = None;
 
         let init_req_valid = pb::BtcSignInitRequest {
+            taproot_anti_exfil_round: 0,
             coin: pb::BtcCoin::Btc as _,
             script_configs: vec![pb::BtcScriptConfigWithKeypath {
                 script_config: Some(pb::BtcScriptConfig {
@@ -2816,6 +2898,7 @@ mod tests {
                 process(
                     &mut TestingHal::new(),
                     &pb::BtcSignInitRequest {
+                        taproot_anti_exfil_round: 0,
                         coin: pb::BtcCoin::Ltc as _,
                         script_configs: vec![pb::BtcScriptConfigWithKeypath {
                             script_config: Some(pb::BtcScriptConfig {

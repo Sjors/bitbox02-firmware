@@ -339,6 +339,7 @@ class BTCSignInitRequest(google.protobuf.message.Message):
     FORMAT_UNIT_FIELD_NUMBER: builtins.int
     CONTAINS_SILENT_PAYMENT_OUTPUTS_FIELD_NUMBER: builtins.int
     OUTPUT_SCRIPT_CONFIGS_FIELD_NUMBER: builtins.int
+    TAPROOT_ANTI_EXFIL_ROUND_FIELD_NUMBER: builtins.int
     coin: global___BTCCoin.ValueType
     version: builtins.int
     """must be 1 or 2"""
@@ -348,6 +349,8 @@ class BTCSignInitRequest(google.protobuf.message.Message):
     """Consensus nLockTime: values below 500000000 are block heights, otherwise Unix timestamps."""
     format_unit: global___BTCSignInitRequest.FormatUnit.ValueType
     contains_silent_payment_outputs: builtins.bool
+    taproot_anti_exfil_round: builtins.int
+    """0 ordinary, 1 commitment-only, 2 signing."""
     @property
     def script_configs(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___BTCScriptConfigWithKeypath]:
         """used script configs in inputs and changes"""
@@ -370,8 +373,9 @@ class BTCSignInitRequest(google.protobuf.message.Message):
         format_unit: global___BTCSignInitRequest.FormatUnit.ValueType = ...,
         contains_silent_payment_outputs: builtins.bool = ...,
         output_script_configs: collections.abc.Iterable[global___BTCScriptConfigWithKeypath] | None = ...,
+        taproot_anti_exfil_round: builtins.int = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["coin", b"coin", "contains_silent_payment_outputs", b"contains_silent_payment_outputs", "format_unit", b"format_unit", "locktime", b"locktime", "num_inputs", b"num_inputs", "num_outputs", b"num_outputs", "output_script_configs", b"output_script_configs", "script_configs", b"script_configs", "version", b"version"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["coin", b"coin", "contains_silent_payment_outputs", b"contains_silent_payment_outputs", "format_unit", b"format_unit", "locktime", b"locktime", "num_inputs", b"num_inputs", "num_outputs", b"num_outputs", "output_script_configs", b"output_script_configs", "script_configs", b"script_configs", "taproot_anti_exfil_round", b"taproot_anti_exfil_round", "version", b"version"]) -> None: ...
 
 global___BTCSignInitRequest = BTCSignInitRequest
 
@@ -414,6 +418,7 @@ class BTCSignNextResponse(google.protobuf.message.Message):
     ANTI_KLEPTO_SIGNER_COMMITMENT_FIELD_NUMBER: builtins.int
     GENERATED_OUTPUT_PKSCRIPT_FIELD_NUMBER: builtins.int
     SILENT_PAYMENT_DLEQ_PROOF_FIELD_NUMBER: builtins.int
+    TAPROOT_ANTI_EXFIL_NONCE_FIELD_NUMBER: builtins.int
     type: global___BTCSignNextResponse.Type.ValueType
     index: builtins.int
     """index of the current input or output"""
@@ -426,6 +431,8 @@ class BTCSignNextResponse(google.protobuf.message.Message):
     generated_output_pkscript: builtins.bytes
     """Generated output. The host *must* verify its correctness using `silent_payment_dleq_proof`."""
     silent_payment_dleq_proof: builtins.bytes
+    taproot_anti_exfil_nonce: builtins.bytes
+    """33 bytes, and has_signature is false in round 1."""
     @property
     def anti_klepto_signer_commitment(self) -> antiklepto_pb2.AntiKleptoSignerCommitment: ...
     def __init__(
@@ -439,11 +446,42 @@ class BTCSignNextResponse(google.protobuf.message.Message):
         anti_klepto_signer_commitment: antiklepto_pb2.AntiKleptoSignerCommitment | None = ...,
         generated_output_pkscript: builtins.bytes = ...,
         silent_payment_dleq_proof: builtins.bytes = ...,
+        taproot_anti_exfil_nonce: builtins.bytes = ...,
     ) -> None: ...
     def HasField(self, field_name: typing.Literal["anti_klepto_signer_commitment", b"anti_klepto_signer_commitment"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["anti_klepto_signer_commitment", b"anti_klepto_signer_commitment", "generated_output_pkscript", b"generated_output_pkscript", "has_signature", b"has_signature", "index", b"index", "prev_index", b"prev_index", "signature", b"signature", "silent_payment_dleq_proof", b"silent_payment_dleq_proof", "type", b"type"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["anti_klepto_signer_commitment", b"anti_klepto_signer_commitment", "generated_output_pkscript", b"generated_output_pkscript", "has_signature", b"has_signature", "index", b"index", "prev_index", b"prev_index", "signature", b"signature", "silent_payment_dleq_proof", b"silent_payment_dleq_proof", "taproot_anti_exfil_nonce", b"taproot_anti_exfil_nonce", "type", b"type"]) -> None: ...
 
 global___BTCSignNextResponse = BTCSignNextResponse
+
+@typing.final
+class BTCTaprootAntiExfil(google.protobuf.message.Message):
+    """Draft BIP-EXFIL, separate from the ECDSA anti-klepto wire protocol.
+    Empty nonce/entropy selects the commitment-only round. The second round
+    carries the original full compressed nonce and the host opening.
+    """
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    HOST_COMMITMENT_FIELD_NUMBER: builtins.int
+    SIGNER_NONCE_FIELD_NUMBER: builtins.int
+    HOST_ENTROPY_FIELD_NUMBER: builtins.int
+    SIGHASH_FIELD_NUMBER: builtins.int
+    host_commitment: builtins.bytes
+    signer_nonce: builtins.bytes
+    host_entropy: builtins.bytes
+    sighash: builtins.int
+    """0 (DEFAULT) or 1 (ALL)"""
+    def __init__(
+        self,
+        *,
+        host_commitment: builtins.bytes = ...,
+        signer_nonce: builtins.bytes = ...,
+        host_entropy: builtins.bytes = ...,
+        sighash: builtins.int = ...,
+    ) -> None: ...
+    def ClearField(self, field_name: typing.Literal["host_commitment", b"host_commitment", "host_entropy", b"host_entropy", "sighash", b"sighash", "signer_nonce", b"signer_nonce"]) -> None: ...
+
+global___BTCTaprootAntiExfil = BTCTaprootAntiExfil
 
 @typing.final
 class BTCSignInputRequest(google.protobuf.message.Message):
@@ -456,6 +494,7 @@ class BTCSignInputRequest(google.protobuf.message.Message):
     KEYPATH_FIELD_NUMBER: builtins.int
     SCRIPT_CONFIG_INDEX_FIELD_NUMBER: builtins.int
     HOST_NONCE_COMMITMENT_FIELD_NUMBER: builtins.int
+    TAPROOT_ANTI_EXFIL_FIELD_NUMBER: builtins.int
     prevOutHash: builtins.bytes
     prevOutIndex: builtins.int
     prevOutValue: builtins.int
@@ -473,6 +512,8 @@ class BTCSignInputRequest(google.protobuf.message.Message):
         This differs from plain RFC6979 and does not provide anti-klepto protection.
         """
 
+    @property
+    def taproot_anti_exfil(self) -> global___BTCTaprootAntiExfil: ...
     def __init__(
         self,
         *,
@@ -483,9 +524,10 @@ class BTCSignInputRequest(google.protobuf.message.Message):
         keypath: collections.abc.Iterable[builtins.int] | None = ...,
         script_config_index: builtins.int = ...,
         host_nonce_commitment: antiklepto_pb2.AntiKleptoHostNonceCommitment | None = ...,
+        taproot_anti_exfil: global___BTCTaprootAntiExfil | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["host_nonce_commitment", b"host_nonce_commitment"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["host_nonce_commitment", b"host_nonce_commitment", "keypath", b"keypath", "prevOutHash", b"prevOutHash", "prevOutIndex", b"prevOutIndex", "prevOutValue", b"prevOutValue", "script_config_index", b"script_config_index", "sequence", b"sequence"]) -> None: ...
+    def HasField(self, field_name: typing.Literal["host_nonce_commitment", b"host_nonce_commitment", "taproot_anti_exfil", b"taproot_anti_exfil"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["host_nonce_commitment", b"host_nonce_commitment", "keypath", b"keypath", "prevOutHash", b"prevOutHash", "prevOutIndex", b"prevOutIndex", "prevOutValue", b"prevOutValue", "script_config_index", b"script_config_index", "sequence", b"sequence", "taproot_anti_exfil", b"taproot_anti_exfil"]) -> None: ...
 
 global___BTCSignInputRequest = BTCSignInputRequest
 

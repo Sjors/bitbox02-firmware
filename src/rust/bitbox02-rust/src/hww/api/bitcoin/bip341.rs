@@ -26,6 +26,11 @@ pub struct Args {
 ///
 /// The hash_type is assumed 0 (`SIGHASH_DEFAULT`). `annex` is assumed to be not present.
 pub fn sighash(args: &Args) -> [u8; 32] {
+    sighash_with_type(args, false)
+}
+
+/// DEFAULT and ALL commit to the same fields but have a different hash-type byte.
+pub fn sighash_with_type(args: &Args, sighash_all: bool) -> [u8; 32] {
     let tag = Sha256::digest(b"TapSighash");
     let mut ctx = Sha256::new();
     ctx.update(tag);
@@ -33,7 +38,7 @@ pub fn sighash(args: &Args) -> [u8; 32] {
     // Sighash epoch 0
     ctx.update(0u8.to_le_bytes());
     // Control:
-    ctx.update(0u8.to_le_bytes());
+    ctx.update([u8::from(sighash_all)]);
     // Transaction data:
     ctx.update(args.version.to_le_bytes());
     ctx.update(args.locktime.to_le_bytes());

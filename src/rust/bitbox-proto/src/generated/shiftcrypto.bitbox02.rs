@@ -124,6 +124,8 @@ pub struct DeviceInfoResponse {
     /// Marketing version of the installed stage1 bootloader. Not present on legacy bootloaders.
     #[prost(string, optional, tag = "9")]
     pub bootloader_version: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(bool, tag = "10")]
+    pub taproot_anti_exfil: bool,
 }
 /// Nested message and enum types in `DeviceInfoResponse`.
 pub mod device_info_response {
@@ -624,6 +626,9 @@ pub struct BtcSignInitRequest {
     /// necessarily the same account (as defined by `script_configs` above).
     #[prost(message, repeated, tag = "10")]
     pub output_script_configs: ::prost::alloc::vec::Vec<BtcScriptConfigWithKeypath>,
+    /// 0 ordinary, 1 commitment-only, 2 signing.
+    #[prost(uint32, tag = "11")]
+    pub taproot_anti_exfil_round: u32,
 }
 /// Nested message and enum types in `BTCSignInitRequest`.
 pub mod btc_sign_init_request {
@@ -679,6 +684,9 @@ pub struct BtcSignNextResponse {
     pub generated_output_pkscript: ::prost::alloc::vec::Vec<u8>,
     #[prost(bytes = "vec", tag = "8")]
     pub silent_payment_dleq_proof: ::prost::alloc::vec::Vec<u8>,
+    /// 33 bytes, and has_signature is false in round 1.
+    #[prost(bytes = "vec", tag = "9")]
+    pub taproot_anti_exfil_nonce: ::prost::alloc::vec::Vec<u8>,
 }
 /// Nested message and enum types in `BTCSignNextResponse`.
 pub mod btc_sign_next_response {
@@ -728,6 +736,21 @@ pub mod btc_sign_next_response {
         }
     }
 }
+/// Draft BIP-EXFIL, separate from the ECDSA anti-klepto wire protocol.
+/// Empty nonce/entropy selects the commitment-only round. The second round
+/// carries the original full compressed nonce and the host opening.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BtcTaprootAntiExfil {
+    #[prost(bytes = "vec", tag = "1")]
+    pub host_commitment: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "2")]
+    pub signer_nonce: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "3")]
+    pub host_entropy: ::prost::alloc::vec::Vec<u8>,
+    /// 0 (DEFAULT) or 1 (ALL)
+    #[prost(uint32, tag = "4")]
+    pub sighash: u32,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BtcSignInputRequest {
     #[prost(bytes = "vec", tag = "1")]
@@ -749,6 +772,8 @@ pub struct BtcSignInputRequest {
     /// This differs from plain RFC6979 and does not provide anti-klepto protection.
     #[prost(message, optional, tag = "8")]
     pub host_nonce_commitment: ::core::option::Option<AntiKleptoHostNonceCommitment>,
+    #[prost(message, optional, tag = "9")]
+    pub taproot_anti_exfil: ::core::option::Option<BtcTaprootAntiExfil>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BtcSignOutputRequest {

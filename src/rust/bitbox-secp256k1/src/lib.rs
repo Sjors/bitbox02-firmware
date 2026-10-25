@@ -25,6 +25,23 @@ mod ffi {
     }
 
     unsafe extern "C" {
+        pub fn bitbox_anti_exfil_commit(
+            ctx: *const Context,
+            nonce33: *mut c_uchar,
+            secret32: *const c_uchar,
+            msg32: *const c_uchar,
+            commitment32: *const c_uchar,
+        ) -> c_int;
+        pub fn bitbox_anti_exfil_sign(
+            ctx: *const Context,
+            signature64: *mut c_uchar,
+            secret32: *const c_uchar,
+            msg32: *const c_uchar,
+            commitment32: *const c_uchar,
+            nonce33: *const c_uchar,
+            entropy32: *const c_uchar,
+        ) -> c_int;
+
         pub fn secp256k1_anti_exfil_sign(
             ctx: *const Context,
             sig: *mut Signature,
@@ -357,6 +374,52 @@ pub fn dleq_verify(
         Ok(())
     } else {
         Err(())
+    }
+}
+
+pub fn anti_exfil_commit(
+    secp: &Secp256k1<All>,
+    secret: &[u8; 32],
+    msg: &[u8; 32],
+    commitment: &[u8; 32],
+) -> Result<[u8; 33], ()> {
+    let mut nonce = [0u8; 33];
+    match unsafe {
+        ffi::bitbox_anti_exfil_commit(
+            secp.ctx().as_ptr().cast(),
+            nonce.as_mut_ptr(),
+            secret.as_ptr(),
+            msg.as_ptr(),
+            commitment.as_ptr(),
+        )
+    } {
+        1 => Ok(nonce),
+        _ => Err(()),
+    }
+}
+
+pub fn anti_exfil_sign(
+    secp: &Secp256k1<All>,
+    secret: &[u8; 32],
+    msg: &[u8; 32],
+    commitment: &[u8; 32],
+    nonce: &[u8; 33],
+    entropy: &[u8; 32],
+) -> Result<[u8; 64], ()> {
+    let mut signature = [0u8; 64];
+    match unsafe {
+        ffi::bitbox_anti_exfil_sign(
+            secp.ctx().as_ptr().cast(),
+            signature.as_mut_ptr(),
+            secret.as_ptr(),
+            msg.as_ptr(),
+            commitment.as_ptr(),
+            nonce.as_ptr(),
+            entropy.as_ptr(),
+        )
+    } {
+        1 => Ok(signature),
+        _ => Err(()),
     }
 }
 

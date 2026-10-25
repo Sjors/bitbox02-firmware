@@ -902,6 +902,39 @@ pub async fn secp256k1_schnorr_sign(
     Ok(sig.serialize())
 }
 
+/// Compute the actual Taproot-tweaked signing key for the draft anti-exfil flow.
+/// The keypair and exported scalar are zeroized before this function returns.
+pub async fn taproot_anti_exfil(
+    hal: &mut impl crate::hal::Hal,
+    keypath: &[u32],
+    msg: &[u8; 32],
+    tweak: &[u8; 32],
+    commitment: &[u8; 32],
+    reveal: Option<(&[u8; 33], &[u8; 32])>,
+) -> Result<(Vec<u8>, bool), ()> {
+    let private_key = secp256k1_get_private_key(hal, keypath).await?;
+    let mut keypair = bitcoin::secp256k1::Keypair::from_seckey_slice(SECP256K1, &private_key)
+        .map_err(|_| ())?
+        .add_xonly_tweak(
+            SECP256K1,
+            &bitcoin::secp256k1::Scalar::from_be_bytes(*tweak).map_err(|_| ())?,
+        )
+        .map_err(|_| ())?;
+    let secret = zeroize::Zeroizing::new(keypair.secret_bytes());
+    keypair.non_secure_erase();
+    match reveal {
+        None => Ok((
+            bitbox_secp256k1::anti_exfil_commit(SECP256K1, &secret, msg, commitment)?.to_vec(),
+            false,
+        )),
+        Some((nonce, entropy)) => Ok((
+            bitbox_secp256k1::anti_exfil_sign(SECP256K1, &secret, msg, commitment, nonce, entropy)?
+                .to_vec(),
+            true,
+        )),
+    }
+}
+
 /// Get the seed to be used for u2f
 #[cfg(any(test, feature = "app-u2f"))]
 pub async fn get_u2f_seed(
